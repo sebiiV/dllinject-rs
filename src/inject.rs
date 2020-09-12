@@ -14,7 +14,6 @@ use std::io::Read;
 // Clean up these uses...
 use winapi::shared::minwindef::{BOOL, FALSE, MAX_PATH, TRUE};
 use winapi::shared::ntdef::NULL;
-use winapi::um::errhandlingapi::GetLastError;
 use winapi::um::handleapi::{CloseHandle, INVALID_HANDLE_VALUE};
 use winapi::um::libloaderapi::{GetProcAddress, LoadLibraryW};
 use winapi::um::memoryapi::{VirtualAllocEx, VirtualFreeEx, WriteProcessMemory};
@@ -143,9 +142,6 @@ fn get_proc_bits(h_process: HANDLE) -> Result<Bitness, Error> {
             return Err(Error::last_os_error());
         }
     }
-    unsafe {
-        CloseHandle(h_process);
-    }
 
     if b == TRUE {
         Ok(Bitness::MACHINE32)
@@ -155,9 +151,8 @@ fn get_proc_bits(h_process: HANDLE) -> Result<Bitness, Error> {
 }
 
 #[cfg(target_os = "windows")]
-pub fn inject_library(h_process: HANDLE, dll_path: &str) -> Result<(), Error> {
-
-    // Check architecture of the injected code and program so we don't explode 
+fn bitness_check(h_process: HANDLE, dll_path: &str) -> Result<(), Error> {
+    // Check architecture of the injected code and program so we don't explode
     let pe_bits = get_pe_bits(dll_path);
     let proc_bits = match get_proc_bits(h_process) {
         Ok(b) => b,
@@ -176,6 +171,15 @@ pub fn inject_library(h_process: HANDLE, dll_path: &str) -> Result<(), Error> {
         "Bitness of DLL and Process matched {:?} and {:?}",
         proc_bits, pe_bits
     );
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+pub fn inject_library(h_process: HANDLE, dll_path: &str, check_bits: bool) -> Result<(), Error> {
+    // We might now wanna do this if we are loading a windows DLL rather than one on current $PATH
+    if check_bits == true {
+        bitness_check(h_process, dll_path).unwrap();
+    }
 
     // Get a handle to k32 and get address for LoadLibrary
     let h_kernel32;
@@ -196,7 +200,6 @@ pub fn inject_library(h_process: HANDLE, dll_path: &str) -> Result<(), Error> {
     unsafe {
         thread_start_addr =
             VirtualAllocEx(h_process, null_mut(), path_size, MEM_COMMIT, PAGE_READWRITE);
-        warn! {"{:?}",GetLastError()};
     }
     info!(
         "Thread start addresss allocated at: {:?}",
@@ -260,7 +263,7 @@ pub fn inject_library(h_process: HANDLE, dll_path: &str) -> Result<(), Error> {
     Ok(())
 }
 
-pub fn inject(application_name: &str, dll_path: &str) -> Result<(), Error> {
+pub fn inject(application_name: &str, dll_path: &str, check_bits: bool) -> Result<(), Error> {
     let proc_id = get_proc_id(application_name).unwrap();
     info!("Proc ID found for {}:{}", application_name, proc_id);
     let h_process = open_process(proc_id).unwrap();
@@ -268,7 +271,7 @@ pub fn inject(application_name: &str, dll_path: &str) -> Result<(), Error> {
         "Handle for process got for {}:{:?}",
         application_name, h_process
     );
-    inject_library(h_process, dll_path).unwrap();
+    inject_library(h_process, dll_path, check_bits).unwrap();
     info!(
         "Sucessfully injected {:?} into {}",
         dll_path, application_name
