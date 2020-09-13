@@ -10,18 +10,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "attacher"
-version = "0.1.0"
-dependencies = [
- "env_logger",
- "log",
- "pe",
- "widestring",
- "winapi",
- "wio",
-]
-
-[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -43,6 +31,13 @@ name = "cfg-if"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4785bdd1c96b2a846b2bd7cc02e86b6b3dbf14e7e53446c4f54c92a361040822"
+
+[[package]]
+name = "dll-rs"
+version = "0.1.0"
+dependencies = [
+ "winapi",
+]
 
 [[package]]
 name = "env_logger"
@@ -76,6 +71,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "injector"
+version = "0.1.0"
+dependencies = [
+ "dll-rs",
+ "env_logger",
+ "log",
+ "pe",
+ "widestring",
+ "winapi",
+ "wio",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -83,9 +91,9 @@ checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
 
 [[package]]
 name = "libc"
-version = "0.2.76"
+version = "0.2.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "755456fae044e6fa1ebbbd1b3e902ae19e73097ed4ed87bb79934a867c007bc3"
+checksum = "f2f96b10ec2560088a8e76961b00d47107b3a625fecb76dedb29ee7ccbf98235"
 
 [[package]]
 name = "log"
