@@ -1,37 +1,77 @@
-#![cfg(windows)]
+use detour::static_detour;
 
-use winapi::shared::minwindef;
-use winapi::shared::minwindef::{BOOL, DWORD, HINSTANCE, LPVOID};
-use winapi::um::consoleapi;
+use std::error::Error;
+use std::{ffi::CString, iter, mem};
 
-/// Entry point which will be called by the system once the DLL has been loaded
-/// in the target process. Declaring this function is optional.
-///
-/// # Safety
-///
-/// What you can safely do inside here is very limited, see the Microsoft documentation
-/// about "DllMain". Rust also doesn't officially support a "life before main()",
-/// though it is unclear what that that means exactly for DllMain.
-#[no_mangle]
-#[allow(non_snake_case, unused_variables)]
-extern "system" fn DllMain(
-    dll_module: HINSTANCE,
-    call_reason: DWORD,
-    reserved: LPVOID)
-    -> BOOL
-{
-    const DLL_PROCESS_ATTACH: DWORD = 1;
-    const DLL_PROCESS_DETACH: DWORD = 0;
+use winapi::ctypes::c_int;
+use winapi::shared::minwindef::{BOOL, DWORD, HINSTANCE, LPVOID, TRUE, UINT};
+use winapi::shared::windef::HWND;
+use winapi::um::libloaderapi::{GetModuleHandleW, GetProcAddress};
+use winapi::um::winnt::{DLL_PROCESS_ATTACH, LPCWSTR};
 
-    match call_reason {
-        DLL_PROCESS_ATTACH => demo_init(),
-        DLL_PROCESS_DETACH => (),
-        _ => ()
-    }
-    minwindef::TRUE
+static_detour! {
+  static MessageBoxWHook: unsafe extern "system" fn(HWND, LPCWSTR, LPCWSTR, UINT) -> c_int;
 }
 
-fn demo_init() {
-    unsafe { consoleapi::AllocConsole() };
-    println!("Hello, world!");
+// A type alias for `MessageBoxW` (makes the transmute easy on the eyes)
+type FnMessageBoxW = unsafe extern "system" fn(HWND, LPCWSTR, LPCWSTR, UINT) -> c_int;
+
+/// Called when the DLL is attached to the process.
+unsafe fn main() -> Result<(), Box<dyn Error>> {
+    // Retrieve an absolute address of `MessageBoxW`. This is required for
+    // libraries due to the import address table. If `MessageBoxW` would be
+    // provided directly as the target, it would only hook this DLL's
+    // `MessageBoxW`. Using the method below an absolute address is retrieved
+    // instead, detouring all invocations of `MessageBoxW` in the active process.
+    let address = get_module_symbol_address("user32.dll", "MessageBoxW")
+        .expect("could not find 'MessageBoxW' address");
+    let target: FnMessageBoxW = mem::transmute(address);
+
+    // Initialize AND enable the detour (the 2nd parameter can also be a closure)
+    MessageBoxWHook
+        .initialize(target, messageboxw_detour)?
+        .enable()?;
+    Ok(())
+}
+
+/// Called whenever `MessageBoxW` is invoked in the process.
+fn messageboxw_detour(hwnd: HWND, text: LPCWSTR, _caption: LPCWSTR, u_type: UINT) -> c_int {
+    // Call the original `MessageBoxW`, but replace the caption
+    let replaced_caption = "Detoured!\0".encode_utf16().collect::<Vec<u16>>();
+    unsafe { MessageBoxWHook.call(hwnd, text, replaced_caption.as_ptr() as _, u_type) }
+}
+
+/// Returns a module symbol's absolute address.
+fn get_module_symbol_address(module: &str, symbol: &str) -> Option<usize> {
+    let module = module
+        .encode_utf16()
+        .chain(iter::once(0))
+        .collect::<Vec<u16>>();
+    let symbol = CString::new(symbol).unwrap();
+    unsafe {
+        let handle = GetModuleHandleW(module.as_ptr());
+        match GetProcAddress(handle, symbol.as_ptr()) as usize {
+            0 => None,
+            n => Some(n),
+        }
+    }
+}
+
+#[no_mangle]
+#[allow(non_snake_case)]
+pub unsafe extern "system" fn DllMain(
+    _module: HINSTANCE,
+    call_reason: DWORD,
+    _reserved: LPVOID,
+) -> BOOL {
+    if call_reason == DLL_PROCESS_ATTACH {
+        // A console may be useful for printing to 'stdout'
+        // winapi::um::consoleapi::AllocConsole();
+
+        // Preferably a thread should be created here instead, since as few
+        // operations as possible should be performed within `DllMain`.
+        main().is_ok() as BOOL
+    } else {
+        TRUE
+    }
 }
